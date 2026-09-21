@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<!DOCTYPE suppressions PUBLIC
+    "-//Checkstyle//DTD SuppressionFilter Configuration 1.2//EN"
+    "https://checkstyle.org/dtds/suppressions_1_2.dtd">
+
+<suppressions>
+
+  <!-- Exclude application entrypoints from parameter limit -->
+  <suppress files=".*[\\/]src[\\/]main[\\/].*[\\/]AiDevelopmentTrainingApplication\.java" checks="ParameterNumber" />
+
+  <!-- UT/IT Suppressions -->
+  <suppress files=".*[\\/]src[\\/](test|it)[\\/]" checks="MagicNumber" />
+  <suppress files=".*[\\/]src[\\/](test|it)[\\/]" checks="AnnotationLocation" />
+  <suppress files=".*[\\/]src[\\/](test|it)[\\/]" checks="ExecutableStatementCount" />
+  <suppress files=".*[\\/]src[\\/](test|it)[\\/]" checks="VisibilityModifier" />
+
+  <!-- UT Suppressions -->
+  <suppress files=".*[\\/]src[\\/](test)[\\/]" checks="InnerTypeLast" />
+
+</suppressions>

@@ -1,0 +1,92 @@
+services:
+
+  # --- Messaging infrastructure -------------------------------------------
+
+  kafka:
+    image: apache/kafka:3.9.0
+    container_name: kafka
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://kafka:19092,CONTROLLER://kafka:19093,PLAINTEXT_HOST://0.0.0.0:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:19092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:19093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    healthcheck:
+      test: [ "CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 || exit 1" ]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+
+  rocketmq-namesrv:
+    image: apache/rocketmq:5.3.2
+    container_name: rocketmq-namesrv
+    ports:
+      - "9876:9876"
+    command: sh mqnamesrv
+
+  rocketmq-broker:
+    image: apache/rocketmq:5.3.2
+    container_name: rocketmq-broker
+    depends_on:
+      - rocketmq-namesrv
+    ports:
+      - "10909:10909"
+      - "10911:10911"
+      - "10912:10912"
+    environment:
+      NAMESRV_ADDR: rocketmq-namesrv:9876
+    command: sh mqbroker -n rocketmq-namesrv:9876
+
+  # --- Application services -------------------------------------------------
+
+  event-outcome-producer:
+    build: ./event-outcome-producer
+    pull_policy: build
+    container_name: event-outcome-producer
+    depends_on:
+      kafka:
+        condition: service_healthy
+    ports:
+      - "8081:8080"
+    environment:
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:19092
+      EVENT_OUTCOME_PRODUCER_EVENT_OUTCOME_TOPIC: event-outcomes
+
+  event-matcher-worker:
+    build: ./event-matcher-worker
+    pull_policy: build
+    container_name: event-matcher-worker
+    depends_on:
+      kafka:
+        condition: service_healthy
+      rocketmq-broker:
+        condition: service_started
+    ports:
+      - "8082:8080"
+    environment:
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:19092
+      EVENT_MATCHER_WORKER_KAFKA_GROUP_ID: event-matcher-worker
+      EVENT_MATCHER_WORKER_EVENT_OUTCOME_TOPIC: event-outcomes
+      EVENT_MATCHER_WORKER_ROCKETMQ_NAME_SERVER: rocketmq-namesrv:9876
+      EVENT_MATCHER_WORKER_ROCKETMQ_PRODUCER_GROUP: event-matcher-worker-producer
+      EVENT_MATCHER_WORKER_OUTBOX_BET_SETTLEMENT_TOPIC: bet-settlements
+
+  bet-settler-worker:
+    build: ./bet-settler-worker
+    pull_policy: build
+    container_name: bet-settler-worker
+    depends_on:
+      rocketmq-broker:
+        condition: service_started
+    environment:
+      BET_SETTLER_WORKER_ROCKETMQ_NAME_SERVER: rocketmq-namesrv:9876
+      BET_SETTLER_WORKER_ROCKETMQ_TOPIC: bet-settlements
+      BET_SETTLER_WORKER_ROCKETMQ_CONSUMER_GROUP: bet-settler-worker

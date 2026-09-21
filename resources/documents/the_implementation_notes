@@ -1,0 +1,32 @@
+event-outcome-producer:
+
+Responsibility:
+1) Get [event outcome] via REST endpoint.
+2) Put the [event outcome] in Kafka Topic.
+
+Glossary:
+[event outcome] - Sporting event result. In the JSON form. Is represented by: Event ID, Event Name, Event Winner ID
+
+/---------------------/
+event-matcher-worker:
+
+Responsibility:
+1) Consume [event outcome] from Kafka Topic.
+2) For each [event outcome] produce 1+ [unit of work].
+3) Put [unit of work] in RocketMQ topic.
+
+Glossary:
+[bet] - a sporting bet, that contains :Bet ID, User ID, Event ID, Event Market ID, Event Winner ID, Bet Amount
+[unit of work] - an object derived from an one [event outcome] and 1+ linked [bet].
+ In the JSON form. Is represented by: Unit ID, Event ID, Task Type
+
+/---------------------/
+bet-settler-worker:
+
+Responsibility:
+1) Consume [unit of work] from RocketMQ Topic.
+2) For each [unit of work] produce 1+ [settled bet].
+
+Glossary:
+[settled bet] - a bet that has been processed and its outcome determined.
+ In the JSON form. Is represented by: Settled Bet ID, Bet ID, User ID, Event ID, Event Market ID, Event Winner ID, Bet Amount, Settlement Status
