@@ -2,6 +2,7 @@ package com.sporty.event.outcome.producer.adapter.in.controller;
 
 import com.sporty.event.outcome.producer.adapter.out.messaging.EventOutcomeMessage;
 import com.sporty.event.outcome.producer.usecase.ProcessEventOutcomeUseCase;
+import jakarta.validation.Valid;
 import lombok.AccessLevel;
 import lombok.RequiredArgsConstructor;
 import lombok.experimental.FieldDefaults;
@@ -26,11 +27,13 @@ public class EventOutcomeController {
     /**
      * Accepts an event outcome and hands it off for asynchronous Kafka publication.
      *
-     * @param message event outcome submitted by the API caller.
+     * @param request event outcome submitted by the API caller.
      * @return {@code 202 Accepted} once the message has been queued for publication.
      */
     @PostMapping
-    public ResponseEntity<Void> publishEvent (@RequestBody EventOutcomeMessage message) {
+    public ResponseEntity<Void> publishEvent(@Valid @RequestBody PublishEventOutcomeRequest request) {
+        var message = new EventOutcomeMessage(
+                request.eventId(), request.eventName(), request.eventWinnerId());
         processEventOutcomeUseCase.publishEventOutcome(message);
         return ResponseEntity.status(HttpStatus.ACCEPTED).build();
     }

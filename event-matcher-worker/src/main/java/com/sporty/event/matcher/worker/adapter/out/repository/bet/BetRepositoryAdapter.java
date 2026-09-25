@@ -75,6 +75,7 @@ public class BetRepositoryAdapter implements BetRepository {
     @Override
     public void create(Bet bet) {
         BetEntity entity = mapper.toEntity(bet);
+        entity.setStatus(BetStatus.PENDING);
         entity.setId(UUID.randomUUID());
         jdbcRepository.save(entity);
     }

@@ -1,5 +1,7 @@
 package com.sporty.bet.settler.worker.adapter.in.messaging;
 
+import com.sporty.bet.settler.worker.application.idempotency.DuplicateMessageException;
+import com.sporty.bet.settler.worker.usecase.SettleBetsCommand;
 import com.sporty.bet.settler.worker.usecase.SettleBetsUseCase;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -26,6 +28,7 @@ public class BetSettlementListener implements RocketMQListener<MessageExt> {
 
     private final SettleBetsUseCase settleBetsUseCase;
     private final ObjectMapper objectMapper;
+    private final SettleBetsCommandMapper betsCommandMapper;
 
     /**
      * Deserializes a settlement work unit and forwards it for idempotent processing.
@@ -34,6 +37,12 @@ public class BetSettlementListener implements RocketMQListener<MessageExt> {
      * successfully no matter how many times RocketMQ redelivers it, so the failure is logged
      * and the message is dropped here rather than left to exhaust RocketMQ's own reconsume
      * attempts before landing on the dead-letter topic.
+     *
+     * <p>A duplicate delivery is acknowledged rather than retried. The exception is caught here,
+     * outside the use case's transaction boundary, on purpose: swallowing it inside the
+     * transaction would leave that transaction marked rollback-only and the commit would then
+     * fail with {@code UnexpectedRollbackException}, turning every duplicate into an endless
+     * redelivery loop.
      *
      * @param message raw RocketMQ message carrying the serialized {@code BetWorkUnitMessage}.
      */
@@ -49,6 +58,12 @@ public class BetSettlementListener implements RocketMQListener<MessageExt> {
         }
         log.debug("Received settlement unit key=[{}], event=[{}], bets=[{}]",
                 eventKey, unit.eventId(), unit.bets().size());
-        settleBetsUseCase.settleBets(eventKey, unit);
+        try {
+            var command = betsCommandMapper.toCommand(unit);
+            settleBetsUseCase.settleBets(eventKey, command);
+        } catch (DuplicateMessageException e) {
+            log.info("Skipping duplicate delivery of settlement unit [{}] for event [{}]",
+                    eventKey, unit.eventId());
+        }
     }
 }

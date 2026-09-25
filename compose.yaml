@@ -48,7 +48,9 @@ services:
   # --- Application services -------------------------------------------------
 
   event-outcome-producer:
-    build: ./event-outcome-producer
+    build:
+      context: .
+      dockerfile: event-outcome-producer/Dockerfile
     pull_policy: build
     container_name: event-outcome-producer
     depends_on:
@@ -61,7 +63,9 @@ services:
       EVENT_OUTCOME_PRODUCER_EVENT_OUTCOME_TOPIC: event-outcomes
 
   event-matcher-worker:
-    build: ./event-matcher-worker
+    build:
+      context: .
+      dockerfile: event-matcher-worker/Dockerfile
     pull_policy: build
     container_name: event-matcher-worker
     depends_on:
@@ -80,7 +84,9 @@ services:
       EVENT_MATCHER_WORKER_OUTBOX_BET_SETTLEMENT_TOPIC: bet-settlements
 
   bet-settler-worker:
-    build: ./bet-settler-worker
+    build:
+      context: .
+      dockerfile: bet-settler-worker/Dockerfile
     pull_policy: build
     container_name: bet-settler-worker
     depends_on:

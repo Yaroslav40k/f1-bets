@@ -1,28 +1,31 @@
 package com.sporty.bet.settler.worker.application.bet.internal;
 
 import com.sporty.bet.settler.worker.application.bet.BetManager;
+import com.sporty.bet.settler.worker.application.bet.BetSettlementRepository;
 import com.sporty.bet.settler.worker.application.bet.internal.model.BetSettlement;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 /**
- * Simulates the settlement persistence adapter by logging the computed result for each bet.
+ * Implements the application bet manager by delegating persistence work to the repository port.
  */
 @Slf4j
 @Component
 @RequiredArgsConstructor
 public class SimpleBetManager implements BetManager {
 
+    private final BetSettlementRepository repository;
+
     /**
-     * Logs the settlement that would normally be written to a durable store.
+     * Persists the settlement produced for a matched bet.
      *
-     * @param betSettlement settlement outcome produced for a matched bet.
+     * @param betSettlement settlement outcome to store.
      */
     @Override
     public void saveSettlement(BetSettlement betSettlement) {
-        //I mimic DB usage here.
-        log.info("Saved settlement [{}]", betSettlement);
+        repository.save(betSettlement);
+        log.debug("Saved settlement [{}]", betSettlement);
     }
 
 }

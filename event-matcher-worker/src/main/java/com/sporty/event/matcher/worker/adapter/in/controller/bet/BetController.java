@@ -1,7 +1,7 @@
 package com.sporty.event.matcher.worker.adapter.in.controller.bet;
 
 import com.sporty.event.matcher.worker.application.BetManager;
-import com.sporty.event.matcher.worker.application.bet.internal.model.Bet;
+import jakarta.validation.Valid;
 import lombok.AccessLevel;
 import lombok.RequiredArgsConstructor;
 import lombok.experimental.FieldDefaults;
@@ -22,15 +22,17 @@ import org.springframework.web.bind.annotation.RestController;
 public class BetController {
 
     BetManager betManager;
+    BetMapper betMapper;
 
     /**
      * Registers a bet so it can later be matched against an event outcome.
      *
-     * @param bet bet payload to persist in the matcher database.
+     * @param request bet payload to persist in the matcher database.
      * @return {@code 201 Created} once the bet has been stored.
      */
     @PutMapping()
-    public ResponseEntity<Void> create(@RequestBody Bet bet) {
+    public ResponseEntity<Void> create(@Valid @RequestBody RegisterBetRequest request) {
+        var bet = betMapper.toBet(request);
         betManager.create(bet);
         return ResponseEntity.status(HttpStatus.CREATED).build();
     }

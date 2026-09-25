@@ -27,7 +27,7 @@ Each service has its own role and can scale separately.
 
 `event-outcome-producer` - gets race results, can be scaled to increase durability to process multiple sporting events' results simultaneously.
 `event-matcher-worker` - for every race outcome, has one responsibility: produces "units of work" - batches with several bets (1-10-100...) and the race result.
-`bet-settler-worker` - picks a "unit of work" from the topic and settles all the bets inside. Each unit's processing is protected from duplicate processing with an idempotency key check.
+`bet-settler-worker` - picks a "unit of work" from the topic and settles all the bets inside. Each unit is settled exactly once: the RocketMQ message key is claimed in a `processed_message` table inside the same transaction as the settlements themselves.
 
 So each service has its own responsibility and is an independent Spring Boot application, internally structured as a **hexagonal
 (ports & adapters) architecture** (`adapter.in` / `adapter.out` / `application` / `usecase` packages),
@@ -50,8 +50,8 @@ Changes become cheaper and easier to implement with AI harnesses.
 
 ## Tech stack
 
-- **Java 21+** / **Spring Boot 4**
-- Spring Web MVC, Spring Kafka, Spring Data JDBC, Spring Modulith (events)
+- **Java 21** / **Spring Boot 4**
+- Spring Web MVC, Spring Kafka, Spring Data JDBC, Bean Validation
 - Apache Kafka & Apache RocketMQ as messaging backbones
 - H2 (in-memory) as the persistence store for each worker
 - MapStruct + Lombok
@@ -61,7 +61,7 @@ Changes become cheaper and easier to implement with AI harnesses.
 
 ### Prerequisites
 - Docker & Docker Compose
-- JDK 21+ and Maven (only needed if you want to build/run modules outside Docker)
+- JDK 21 and Maven (only needed if you want to build/run modules outside Docker)
 
 ### Run everything with Docker Compose
 
@@ -88,23 +88,43 @@ cd event-matcher-worker
 mvn spring-boot:run
 ```
 
-Each module can also be built/tested independently with `mvn clean verify` from its own directory, or all
-at once from the repository root.
+The root `pom.xml` is the parent of all three modules; it owns the Java version, the annotation
+processor configuration and the Surefire/Failsafe split. Build everything with `mvn clean verify` from
+the repository root, or a single module with `mvn -pl event-matcher-worker -am clean verify`.
 
 ## Trying it out
 
-**1. Register a bet** on `event-matcher-worker`:
+**1. Register two bets** on `event-matcher-worker`. `eventWinnerId` is the outcome the bettor is
+backing, so the first bet below backs the driver who goes on to win, and the second backs a
+different driver:
 
 ```bash
+# This bet will be settled as WON: its eventWinnerId matches the outcome published in step 2.
 curl -X PUT http://localhost:8082/api/v1/bet \
   -H "Content-Type: application/json" \
   -d '{
         "userId": "11111111-1111-1111-1111-111111111111",
         "eventId": "22222222-2222-2222-2222-222222222222",
         "eventMarketId": "33333333-3333-3333-3333-333333333333",
+        "eventWinnerId": "44444444-4444-4444-4444-444444444444",
+        "amount": 10.50
+      }'
+
+# This bet will be settled as LOST: it backs a different winner.
+curl -X PUT http://localhost:8082/api/v1/bet \
+  -H "Content-Type: application/json" \
+  -d '{
+        "userId": "11111111-1111-1111-1111-111111111111",
+        "eventId": "22222222-2222-2222-2222-222222222222",
+        "eventMarketId": "33333333-3333-3333-3333-333333333333",
+        "eventWinnerId": "55555555-5555-5555-5555-555555555555",
         "amount": 10.50
       }'
 ```
+
+Both bets are stored with status `PENDING`. The status is owned by the platform and cannot be set
+by the caller. All fields above are required; omitting one, or sending a non-positive `amount`,
+returns `400 Bad Request` with a problem detail listing the offending fields.
 
 **2. Publish the event outcome** on `event-outcome-producer`:
 
@@ -114,13 +134,14 @@ curl -X POST http://localhost:8081/api/v1/event-outcome \
   -d '{
         "eventId": "22222222-2222-2222-2222-222222222222",
         "eventName": "Monaco Grand Prix",
-        "eventWinnerId": "33333333-3333-3333-3333-333333333333"
+        "eventWinnerId": "44444444-4444-4444-4444-444444444444"
       }'
 ```
 
-`event-matcher-worker` consumes this from Kafka, matches it against the bet placed in step 1, records the
-result via its transactional outbox, and forwards a settlement work unit to `bet-settler-worker` over
-RocketMQ, which then finalizes the bet.
+`event-matcher-worker` consumes this from Kafka, matches it against the bets placed in step 1, records
+the result via its transactional outbox, and forwards a settlement work unit to `bet-settler-worker`
+over RocketMQ, which then finalizes each bet: the first as `WON` (with a payout) and the second as
+`LOST`.
 
 ## Automatic load
 You can use [load_bets.py](scripts/load_bets.py) to generate load for the system.
@@ -139,10 +160,34 @@ f1-bets/
 
 ## Notes for reviewers
 
-- Only `event-matcher-worker` owns its own H2 database and uses **Spring Data JDBC** rather than JPA/Hibernate — schema is defined explicitly in `schema.sql`.
+- Both `event-matcher-worker` and `bet-settler-worker` own an H2 database and use **Spring Data JDBC** rather than JPA/Hibernate — schemas are defined explicitly in `schema.sql`.
 - `event-matcher-worker` implements the **transactional outbox pattern** so that persisting a bet match and
   reliably dispatching the downstream RocketMQ message never fall out of sync.
 - All inter-service communication is asynchronous (Kafka / RocketMQ).
-- I have left `bet-settler-worker` output open (it just prints the result in the console). In prod-grade systems there could be persistence operation or futher async call.
+- `bet-settler-worker` settles each work unit **exactly once** using a `processed_message` ledger whose
+  primary key is the RocketMQ `KEYS` header. The claim is an `INSERT`, so it is the primary-key
+  constraint — not a read-then-write check — that rejects a concurrent duplicate. Crucially the claim
+  is written in the *same transaction* as the settlements it protects: if settlement fails part-way
+  through, the claim rolls back with it and the broker's redelivery is reprocessed instead of being
+  silently skipped. `BetSettlementListenerIT` covers this failure path explicitly.
+- The duplicate is caught in the listener, *outside* the use case's transaction boundary. Swallowing it
+  inside would leave the transaction marked rollback-only and the commit would fail with
+  `UnexpectedRollbackException`, turning every duplicate into an endless redelivery loop.
 - No dead-letter topic is configured for either broker — skipped for simplicity. Ideally there should be two: one on the Kafka side (`event-outcomes`) and one on the RocketMQ side (`bet-settlements`), so a message that keeps failing gets parked for inspection instead of being retried a bounded number of times and then dropped/logged.
 - The Kafka producer in `event-outcome-producer` doesn't enable producer idempotence (`acks=all` + `enable.idempotence=true`). It isn't needed here because `event-matcher-worker` already guards against duplicate/re-delivered event outcomes at the business layer — a bet can only be claimed once via a conditional `PENDING → DISPATCHED` status transition, so processing the same outcome twice is a safe no-op.
+- Request bodies are bound to dedicated adapter-level request records (`RegisterBetRequest`,
+  `PublishEventOutcomeRequest`) and validated with Bean Validation. A `@RestControllerAdvice` turns
+  both validation failures and unparseable bodies into `400` problem details listing the offending
+  fields, so an invalid request can never reach the database and surface as an opaque `500`.
+- A bet's `status` is never accepted from the caller. It is assigned as `PENDING` by the persistence
+  adapter, which is what makes the README walkthrough work from a cold start.
+- `bet-settler-worker`'s RocketMQ listener consumes **concurrently** rather than orderly. Ordering is
+  deliberately not relied upon for correctness: the `processed_message` claim provides the
+  exactly-once guarantee, which keeps throughput up without reintroducing a per-queue serial
+  bottleneck.
+- Testing: unit tests run under Surefire, integration tests (`*IT.java`) under Failsafe during
+  `verify`. Coverage includes the README happy path over HTTP (`BetControllerIT`), API validation on
+  both services, the matcher's outcome → outbox → RocketMQ flow, the settler's WON/LOST settlement,
+  its redelivery and mid-failure rollback behaviour, and a wire-contract test
+  (`BetSettlementWireContractIT`) that drives the settler with the exact JSON the matcher publishes.
+  The Kafka integration tests use Testcontainers and self-skip when Docker is unavailable.

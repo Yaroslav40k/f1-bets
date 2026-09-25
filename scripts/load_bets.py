@@ -107,7 +107,6 @@ def build_bet_payload(event: Event, loss_rate: float) -> dict:
         "eventMarketId": event.event_market_id,
         "eventWinnerId": picked_runner,
         "amount": random_amount(),
-        "status": "PENDING"
     }
 
 

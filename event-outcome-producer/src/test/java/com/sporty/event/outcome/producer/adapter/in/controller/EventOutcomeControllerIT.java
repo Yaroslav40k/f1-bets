@@ -20,6 +20,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.springframework.http.MediaType.APPLICATION_JSON;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @SpringBootTest
@@ -78,6 +79,37 @@ class EventOutcomeControllerIT {
                                 }
                                 """))
                 .andExpect(status().is4xxClientError());
+
+        verify(kafkaTemplate, never()).send(eq("event-outcomes"), org.mockito.ArgumentMatchers.any(EventOutcomeMessage.class));
+    }
+
+    @Test
+    void publishEventOutcome_missingRequiredFields_returnsBadRequestListingEveryOffendingField() throws Exception {
+        mockMvc.perform(post("/api/v1/event-outcome")
+                        .contentType(APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.title").value("Validation failed"))
+                .andExpect(jsonPath("$.errors.eventId").exists())
+                .andExpect(jsonPath("$.errors.eventName").exists())
+                .andExpect(jsonPath("$.errors.eventWinnerId").exists());
+
+        verify(kafkaTemplate, never()).send(eq("event-outcomes"), org.mockito.ArgumentMatchers.any(EventOutcomeMessage.class));
+    }
+
+    @Test
+    void publishEventOutcome_blankEventName_returnsBadRequest() throws Exception {
+        mockMvc.perform(post("/api/v1/event-outcome")
+                        .contentType(APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "eventId": "f936be98-a654-4b32-b0c5-2992d0079b8d",
+                                  "eventName": "   ",
+                                  "eventWinnerId": "c77911a3-a2f7-4a5a-8095-8793c5672c6e"
+                                }
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errors.eventName").exists());
 
         verify(kafkaTemplate, never()).send(eq("event-outcomes"), org.mockito.ArgumentMatchers.any(EventOutcomeMessage.class));
     }
